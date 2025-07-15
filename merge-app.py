@@ -4,8 +4,9 @@ import os
 import tempfile
 import shutil
 from datetime import datetime
-import xlwings as xw
 from openpyxl import load_workbook
+from openpyxl.styles import PatternFill, Font, Border, Side, Alignment
+from copy import copy
 
 # Konfigurasi halaman
 st.set_page_config(
@@ -67,38 +68,56 @@ def is_missing_value(value):
 def count_missing_values(row):
     return sum(1 for value in row if is_missing_value(value))
 
-def update_template_metadata(template_path, metadata):
+def copy_cell_style(source_cell, target_cell):
+    """Copy all styling from source cell to target cell"""
+    if source_cell.has_style:
+        target_cell.font = copy(source_cell.font)
+        target_cell.border = copy(source_cell.border)
+        target_cell.fill = copy(source_cell.fill)
+        target_cell.number_format = copy(source_cell.number_format)
+        target_cell.protection = copy(source_cell.protection)
+        target_cell.alignment = copy(source_cell.alignment)
+
+def prepare_template_with_styles(template_path, num_data_rows):
+    """Prepare template by copying header row styles to data rows"""
     try:
-        app = xw.App(visible=False)
-        wb = app.books.open(template_path)
-        ws = wb.sheets[0]
+        wb = load_workbook(template_path)
+        ws = wb.active
         
-        ws.range('F5').value = metadata['periode']
-        ws.range('F7').value = metadata['kanwil']
-        ws.range('F9').value = metadata['kanca']
-        ws.range('F11').value = metadata['unit_kerja']
+        # Baris header (row 14) - sesuaikan dengan template Anda
+        header_row = 14
+        start_data_row = 15
         
-        wb.save()
-        wb.close()
-        app.quit()
+        # Copy style dari header row ke semua data rows yang diperlukan
+        for row_num in range(start_data_row, start_data_row + num_data_rows):
+            for col_num in range(1, len(required_columns) + 1):
+                header_cell = ws.cell(row=header_row, column=col_num)
+                data_cell = ws.cell(row=row_num, column=col_num)
+                copy_cell_style(header_cell, data_cell)
+        
+        wb.save(template_path)
+        return True, "Template berhasil dipersiapkan"
+        
+    except Exception as e:
+        return False, f"Error preparing template: {e}"
+
+def update_template_metadata(template_path, metadata):
+    """Update metadata in template file"""
+    try:
+        wb = load_workbook(template_path)
+        ws = wb.active
+        
+        # Update metadata - sesuaikan dengan posisi cell di template Anda
+        ws['F5'] = metadata['periode']
+        ws['F7'] = metadata['kanwil']
+        ws['F9'] = metadata['kanca']
+        ws['F11'] = metadata['unit_kerja']
+        
+        wb.save(template_path)
         return True, "Metadata berhasil diinput"
         
     except Exception as e:
-        try:
-            from openpyxl import load_workbook
-            wb = load_workbook(template_path)
-            ws = wb.active
-            
-            ws['F5'] = metadata['periode']
-            ws['F7'] = metadata['kanwil']
-            ws['F9'] = metadata['kanca']
-            ws['F11'] = metadata['unit_kerja']
-            
-            wb.save(template_path)
-            return True, "Metadata berhasil diinput dengan fallback"
-            
-        except Exception as e2:
-            return False, f"Error updating metadata: {e2}"
+        return False, f"Error updating metadata: {e}"
 
 def process_files(uploaded_files, temp_dir):
     data_list = []
@@ -141,6 +160,7 @@ def process_files(uploaded_files, temp_dir):
     return data_list, processing_log
 
 def create_final_file(data_list, template_path, output_path):
+    """Create final merged file with proper formatting"""
     if not data_list:
         return False, "Tidak ada data untuk digabung!"
 
@@ -156,43 +176,42 @@ def create_final_file(data_list, template_path, output_path):
         if col in gabungan_df.columns:
             gabungan_df.loc[:, col] = gabungan_df[col].apply(format_numeric_value)
 
+    # Copy template to output
     shutil.copy2(template_path, output_path)
 
     try:
-        app = xw.App(visible=False)
-        wb = app.books.open(output_path)
-        ws = wb.sheets[0]
+        # Prepare template dengan styling untuk semua baris data
+        prepare_success, prepare_msg = prepare_template_with_styles(template_path, len(gabungan_df))
+        if not prepare_success:
+            st.warning(f"Warning: {prepare_msg}")
         
-        start_row = 15
+        # Copy template yang sudah dipersiapkan ke output
+        shutil.copy2(template_path, output_path)
         
+        # Load workbook dan input data
+        wb = load_workbook(output_path)
+        ws = wb.active
+        
+        start_row = 15  # Baris mulai data
+        
+        # Input data dengan mempertahankan formatting
         for r_idx, row in enumerate(gabungan_df.itertuples(index=False), start=start_row):
             for c_idx, value in enumerate(row, start=1):
                 if is_missing_value(value):
                     continue
-                ws.range(r_idx, c_idx).value = value
+                
+                cell = ws.cell(row=r_idx, column=c_idx)
+                cell.value = value
+                
+                # Jika perlu, copy style dari header row (opsional, karena sudah dilakukan di prepare_template_with_styles)
+                # header_cell = ws.cell(row=14, column=c_idx)
+                # copy_cell_style(header_cell, cell)
         
-        wb.save()
-        wb.close()
-        app.quit()
-        
-        return True, f"✅ Data berhasil digabung ke dalam file. Total {len(gabungan_df)} baris data"
+        wb.save(output_path)
+        return True, f"✅ Data berhasil digabung dengan formatting. Total {len(gabungan_df)} baris data"
         
     except Exception as e:
-        try:
-            wb = load_workbook(output_path)
-            ws = wb.active
-            
-            for r_idx, row in enumerate(gabungan_df.itertuples(index=False), start=15):
-                for c_idx, value in enumerate(row, start=1):
-                    if is_missing_value(value):
-                        continue
-                    ws.cell(row=r_idx, column=c_idx).value = value
-            
-            wb.save(output_path)
-            return True, f"✅ Data berhasil digabung (fallback mode). Total {len(gabungan_df)} baris data"
-            
-        except Exception as e2:
-            return False, f"Error: {e2}"
+        return False, f"Error: {e}"
 
 def main():
     st.title("📊 Excel File Merger - BRI CKPN")
@@ -284,7 +303,15 @@ def main():
             progress_bar.progress(100)
             status_text.text("✅ Pemrosesan selesai!")
             
+            # Tampilkan log pemrosesan
+            if processing_log:
+                st.subheader("📋 Log Pemrosesan")
+                for log in processing_log:
+                    st.text(log)
+            
             if success:
+                st.success(result_message)
+                
                 with open(output_path, 'rb') as f:
                     file_data = f.read()
 
