@@ -6,6 +6,7 @@ import shutil
 from datetime import datetime
 import xlwings as xw
 from openpyxl import load_workbook
+from openpyxl.cell import MergedCell
 
 # Konfigurasi halaman
 st.set_page_config(
@@ -67,6 +68,22 @@ def is_missing_value(value):
 def count_missing_values(row):
     return sum(1 for value in row if is_missing_value(value))
 
+def safe_write_cell(ws, row, col, value):
+    """Safely write to cell, handling merged cells"""
+    try:
+        cell = ws.cell(row=row, column=col)
+        if isinstance(cell, MergedCell):
+            # Find the top-left cell of the merged range
+            for merged_range in ws.merged_cells.ranges:
+                if cell.coordinate in merged_range:
+                    top_left = merged_range.start_cell
+                    ws[top_left.coordinate] = value
+                    return
+        else:
+            cell.value = value
+    except Exception as e:
+        print(f"Warning: Could not write to cell ({row}, {col}): {e}")
+
 def update_template_metadata(template_path, metadata):
     try:
         app = xw.App(visible=False)
@@ -85,14 +102,14 @@ def update_template_metadata(template_path, metadata):
         
     except Exception as e:
         try:
-            from openpyxl import load_workbook
             wb = load_workbook(template_path)
             ws = wb.active
             
-            ws['F5'] = metadata['periode']
-            ws['F7'] = metadata['kanwil']
-            ws['F9'] = metadata['kanca']
-            ws['F11'] = metadata['unit_kerja']
+            # Use safe_write_cell for openpyxl fallback
+            safe_write_cell(ws, 5, 6, metadata['periode'])  # F5
+            safe_write_cell(ws, 7, 6, metadata['kanwil'])   # F7
+            safe_write_cell(ws, 9, 6, metadata['kanca'])    # F9
+            safe_write_cell(ws, 11, 6, metadata['unit_kerja'])  # F11
             
             wb.save(template_path)
             return True, "Metadata berhasil diinput dengan fallback"
@@ -182,11 +199,12 @@ def create_final_file(data_list, template_path, output_path):
             wb = load_workbook(output_path)
             ws = wb.active
             
+            # Use safe_write_cell for data writing
             for r_idx, row in enumerate(gabungan_df.itertuples(index=False), start=15):
                 for c_idx, value in enumerate(row, start=1):
                     if is_missing_value(value):
                         continue
-                    ws.cell(row=r_idx, column=c_idx).value = value
+                    safe_write_cell(ws, r_idx, c_idx, value)
             
             wb.save(output_path)
             return True, f"✅ Data berhasil digabung (fallback mode). Total {len(gabungan_df)} baris data"
