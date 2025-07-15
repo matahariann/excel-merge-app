@@ -1,0 +1,5 @@
+pandas
+xlwings
+openpyxl
+shutilwhich
+streamlit
