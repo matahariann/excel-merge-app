@@ -6,9 +6,6 @@ import shutil
 from datetime import datetime
 import xlwings as xw
 from openpyxl import load_workbook
-from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
-import copy
 
 # Konfigurasi halaman
 st.set_page_config(
@@ -70,84 +67,8 @@ def is_missing_value(value):
 def count_missing_values(row):
     return sum(1 for value in row if is_missing_value(value))
 
-def copy_cell_style(source_cell, target_cell):
-    """Copy style from source cell to target cell"""
-    try:
-        if source_cell.fill and source_cell.fill.fill_type:
-            target_cell.fill = copy.copy(source_cell.fill)
-        if source_cell.font:
-            target_cell.font = copy.copy(source_cell.font)
-        if source_cell.border:
-            target_cell.border = copy.copy(source_cell.border)
-        if source_cell.alignment:
-            target_cell.alignment = copy.copy(source_cell.alignment)
-        if source_cell.number_format:
-            target_cell.number_format = source_cell.number_format
-    except Exception as e:
-        pass  # Ignore styling errors
-
-def copy_row_styles(source_ws, target_ws, source_row, target_row, max_col):
-    """Copy entire row styles from source to target"""
-    try:
-        for col in range(1, max_col + 1):
-            source_cell = source_ws.cell(row=source_row, column=col)
-            target_cell = target_ws.cell(row=target_row, column=col)
-            copy_cell_style(source_cell, target_cell)
-    except Exception as e:
-        pass  # Ignore styling errors
-
-def preserve_template_formatting(template_path, output_path, data_start_row=15):
-    """Preserve all formatting from template including backgrounds"""
-    try:
-        # Load template to get original formatting
-        template_wb = load_workbook(template_path)
-        template_ws = template_wb.active
-        
-        # Load output file
-        output_wb = load_workbook(output_path)
-        output_ws = output_wb.active
-        
-        # Copy all formatting from template (including backgrounds)
-        max_row = template_ws.max_row
-        max_col = template_ws.max_column
-        
-        # Copy all cell styles from template
-        for row in range(1, max_row + 1):
-            for col in range(1, max_col + 1):
-                template_cell = template_ws.cell(row=row, column=col)
-                output_cell = output_ws.cell(row=row, column=col)
-                
-                # Copy value if it's not in data area
-                if row < data_start_row:
-                    output_cell.value = template_cell.value
-                
-                # Copy style
-                copy_cell_style(template_cell, output_cell)
-        
-        # Copy column widths
-        for col in template_ws.column_dimensions:
-            if col in output_ws.column_dimensions:
-                output_ws.column_dimensions[col].width = template_ws.column_dimensions[col].width
-        
-        # Copy row heights
-        for row in template_ws.row_dimensions:
-            if row in output_ws.row_dimensions:
-                output_ws.row_dimensions[row].height = template_ws.row_dimensions[row].height
-        
-        # Save the formatted output
-        output_wb.save(output_path)
-        
-        template_wb.close()
-        output_wb.close()
-        
-        return True, "Formatting berhasil dipertahankan"
-        
-    except Exception as e:
-        return False, f"Error preserving formatting: {e}"
-
 def update_template_metadata(template_path, metadata):
     try:
-        # Try xlwings first
         app = xw.App(visible=False)
         wb = app.books.open(template_path)
         ws = wb.sheets[0]
@@ -164,7 +85,7 @@ def update_template_metadata(template_path, metadata):
         
     except Exception as e:
         try:
-            # Fallback to openpyxl
+            from openpyxl import load_workbook
             wb = load_workbook(template_path)
             ws = wb.active
             
@@ -174,7 +95,6 @@ def update_template_metadata(template_path, metadata):
             ws['F11'] = metadata['unit_kerja']
             
             wb.save(template_path)
-            wb.close()
             return True, "Metadata berhasil diinput dengan fallback"
             
         except Exception as e2:
@@ -236,18 +156,16 @@ def create_final_file(data_list, template_path, output_path):
         if col in gabungan_df.columns:
             gabungan_df.loc[:, col] = gabungan_df[col].apply(format_numeric_value)
 
-    # Copy template to output
     shutil.copy2(template_path, output_path)
 
-    data_start_row = 15
-    
     try:
-        # Try xlwings first
         app = xw.App(visible=False)
         wb = app.books.open(output_path)
         ws = wb.sheets[0]
         
-        for r_idx, row in enumerate(gabungan_df.itertuples(index=False), start=data_start_row):
+        start_row = 15
+        
+        for r_idx, row in enumerate(gabungan_df.itertuples(index=False), start=start_row):
             for c_idx, value in enumerate(row, start=1):
                 if is_missing_value(value):
                     continue
@@ -261,40 +179,16 @@ def create_final_file(data_list, template_path, output_path):
         
     except Exception as e:
         try:
-            # Fallback to openpyxl with enhanced formatting preservation
             wb = load_workbook(output_path)
             ws = wb.active
             
-            # Get template formatting reference
-            template_wb = load_workbook(template_path)
-            template_ws = template_wb.active
-            
-            # Insert data while preserving formatting
-            for r_idx, row in enumerate(gabungan_df.itertuples(index=False), start=data_start_row):
+            for r_idx, row in enumerate(gabungan_df.itertuples(index=False), start=15):
                 for c_idx, value in enumerate(row, start=1):
                     if is_missing_value(value):
                         continue
-                    
-                    # Set the value
-                    cell = ws.cell(row=r_idx, column=c_idx)
-                    cell.value = value
-                    
-                    # Try to copy style from template row if it exists
-                    if r_idx <= template_ws.max_row:
-                        template_cell = template_ws.cell(row=r_idx, column=c_idx)
-                        copy_cell_style(template_cell, cell)
-                    elif data_start_row <= template_ws.max_row:
-                        # Use style from header row or first data row
-                        template_cell = template_ws.cell(row=data_start_row, column=c_idx)
-                        copy_cell_style(template_cell, cell)
+                    ws.cell(row=r_idx, column=c_idx).value = value
             
             wb.save(output_path)
-            wb.close()
-            template_wb.close()
-            
-            # Additional step: Preserve all template formatting
-            preserve_success, preserve_msg = preserve_template_formatting(template_path, output_path, data_start_row)
-            
             return True, f"✅ Data berhasil digabung (fallback mode). Total {len(gabungan_df)} baris data"
             
         except Exception as e2:
@@ -387,16 +281,10 @@ def main():
             output_path = os.path.join(temp_dir, 'hasil_gabungan.xlsx')
             success, result_message = create_final_file(data_list, template_path, output_path)
 
+            progress_bar.progress(100)
+            status_text.text("✅ Pemrosesan selesai!")
+            
             if success:
-                progress_bar.progress(90)
-                status_text.text("🔄 Mempertahankan formatting...")
-                
-                # Final formatting preservation step
-                preserve_success, preserve_msg = preserve_template_formatting(template_path, output_path)
-                
-                progress_bar.progress(100)
-                status_text.text("✅ Pemrosesan selesai!")
-                
                 with open(output_path, 'rb') as f:
                     file_data = f.read()
 
@@ -408,13 +296,6 @@ def main():
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     type="primary"
                 )
-                
-                # Show processing log
-                if processing_log:
-                    with st.expander("📋 Log Pemrosesan"):
-                        for log in processing_log:
-                            st.write(log)
-                            
             else:
                 st.error(result_message)
 
