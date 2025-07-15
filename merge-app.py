@@ -23,6 +23,20 @@ required_columns = [
 ]
 numeric_columns = ['NILAI TERCATAT', 'CKPN SEBELUM', 'CKPN BERJALAN', 'BIAYA CKPN']
 
+def format_date_to_indonesian(date_obj):
+    """Convert date object to format: dd Nam yyyy"""
+    month_names = {
+        1: 'Jan', 2: 'Feb', 3: 'Mar', 4: 'Apr',
+        5: 'May', 6: 'Jun', 7: 'Jul', 8: 'Aug',
+        9: 'Sep', 10: 'Oct', 11: 'Nov', 12: 'Dec'
+    }
+    
+    day = date_obj.day
+    month = month_names[date_obj.month]
+    year = date_obj.year
+    
+    return f"{day} {month} {year}"
+
 def format_numeric_value(value):
     if pd.isna(value) or value == '' or value == 'nan':
         return value
@@ -196,15 +210,22 @@ def main():
     col1, col2 = st.columns(2)
     
     with col1:
-        periode = st.text_input("Periode", value="", help="Contoh: 31 Aug 2024")
+        periode_date = st.date_input(
+            "Periode",
+            value=datetime.now(),
+            help="Pilih tanggal periode (akan diformat sebagai dd Nam yyyy)"
+        )
+        
         kanwil = st.text_input("Kantor Wilayah", value="", help="Contoh: G - Semarang")
     
     with col2:
         kanca = st.text_input("Kantor Cabang", value="", help="Contoh: 00156 - KC Batang")
         unit_kerja = st.text_input("Unit Kerja", value="", help="Contoh: 00156 - KC Batang")
     
+    periode_formatted = format_date_to_indonesian(periode_date) if periode_date else ""
+    
     metadata = {
-        'periode': periode,
+        'periode': periode_formatted,
         'kanwil': kanwil,
         'kanca': kanca,
         'unit_kerja': unit_kerja
@@ -229,7 +250,7 @@ def main():
             st.error("❌ Silakan upload minimal satu file untuk digabungkan!")
             return
         
-        if not all([periode, kanwil, kanca, unit_kerja]):
+        if not all([periode_date, kanwil, kanca, unit_kerja]):
             st.error("❌ Silakan lengkapi semua metadata!")
             return
         
@@ -237,7 +258,6 @@ def main():
         status_text = st.empty()
         
         with tempfile.TemporaryDirectory() as temp_dir:
-            # Simpan template file
             template_path = os.path.join(temp_dir, 'template.xlsx')
             with open(template_path, 'wb') as f:
                 f.write(template_file.getbuffer())
